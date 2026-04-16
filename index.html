@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quiz App - Siêu Đa Năng</title>
+    <title>Quiz App - Đỉnh Cao Đa Năng</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.21/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 700px; margin: 40px auto; padding: 20px; background-color: #f0f2f5; color: #1c1e21; }
@@ -26,12 +27,12 @@
 <body>
 
 <div class="container">
-    <h1>Hệ Thống Trắc Nghiệm Đa Năng</h1>
-    <p class="subtitle">Đọc thông minh định dạng Word (.docx) và Excel (.csv)</p>
+    <h1>Hệ Thống Trắc Nghiệm Toàn Diện</h1>
+    <p class="subtitle">Hỗ trợ Excel (.xlsx, .xls, .csv) và Word (.docx)</p>
     
     <div id="uploadSection" class="upload-area">
-        <p style="font-size: 16px; margin-bottom: 15px;">Vui lòng chọn file <b>.docx</b> hoặc <b>.csv</b>:</p>
-        <input type="file" id="dataFile" accept=".docx, .csv, .txt" style="font-size: 15px;">
+        <p style="font-size: 16px; margin-bottom: 15px;">Vui lòng chọn file dữ liệu của bạn:</p>
+        <input type="file" id="dataFile" accept=".docx, .csv, .txt, .xlsx, .xls" style="font-size: 15px;">
         <button class="btn" onclick="processFile()">🚀 Đọc File & Bắt Đầu</button>
         <div id="loadingStatus" class="status"></div>
     </div>
@@ -55,17 +56,36 @@
     let currentQuestionIndex = 0;
     let score = 0;
 
-    // HÀM CHÍNH: QUẢN LÝ ĐỌC FILE
+    // QUẢN LÝ ĐỌC FILE (PHÂN LOẠI WORD, EXCEL, CSV)
     function processFile() {
         const fileInput = document.getElementById('dataFile').files[0];
         const statusEl = document.getElementById('loadingStatus');
         
         if (!fileInput) { alert("Bạn chưa chọn file!"); return; }
 
-        statusEl.innerText = "⏳ Đang quét và phân tích dữ liệu...";
+        statusEl.innerText = "⏳ Đang phân tích dữ liệu đa định dạng...";
         const fileName = fileInput.name.toLowerCase();
 
-        if (fileName.endsWith('.csv') || fileName.endsWith('.txt')) {
+        // 1. Nếu là file Excel (.xlsx, .xls)
+        if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                // Lấy sheet đầu tiên
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                // Chuyển Excel sang JSON
+                const json = XLSX.utils.sheet_to_json(worksheet);
+                
+                let extracted = processTableData(json);
+                if (extracted.length > 0) startQuiz(extracted);
+                else { statusEl.innerText = ""; alert("Lỗi cấu trúc file Excel! Hãy đảm bảo có cột QuestionContent và ResultAnswer."); }
+            };
+            reader.readAsArrayBuffer(fileInput);
+        }
+        // 2. Nếu là file CSV
+        else if (fileName.endsWith('.csv') || fileName.endsWith('.txt')) {
             Papa.parse(fileInput, {
                 header: true, skipEmptyLines: true,
                 complete: function(results) { 
@@ -75,6 +95,7 @@
                 }
             });
         } 
+        // 3. Nếu là file Word (.docx)
         else if (fileName.endsWith('.docx')) {
             const reader = new FileReader();
             reader.onload = function(event) {
@@ -84,12 +105,12 @@
                         let extracted = processTableData(tableData);
                         
                         if (extracted.length > 0) {
-                            startQuiz(extracted);
+                            startQuiz(extracted); // File Word dạng Bảng
                         } else {
                             mammoth.extractRawText({arrayBuffer: event.target.result})
                                 .then(function(textResult) {
                                     let textData = processTextData(textResult.value);
-                                    if (textData.length > 0) startQuiz(textData);
+                                    if (textData.length > 0) startQuiz(textData); // File Word dạng chữ thô
                                     else {
                                         statusEl.innerText = "";
                                         alert("Không nhận diện được câu hỏi! Kiểm tra lại định dạng file.");
@@ -101,30 +122,33 @@
                     });
             };
             reader.readAsArrayBuffer(fileInput);
-        } else { alert("Chỉ hỗ trợ .docx và .csv"); }
+        } else { 
+            statusEl.innerText = ""; 
+            alert("Hệ thống chỉ hỗ trợ .xlsx, .xls, .csv, và .docx"); 
+        }
     }
 
-    // XỬ LÝ DỮ LIỆU BẢNG (TỰ ĐỘNG BẮT ĐÚNG CỘT TÙY CHỈNH A,B,C,D NẾU CÓ)
+    // XỬ LÝ DỮ LIỆU DẠNG BẢNG (CHO CẢ EXCEL, CSV VÀ BẢNG WORD)
     function processTableData(rawData) {
         let validRows = rawData.filter(row => {
             let qKey = Object.keys(row).find(k => k.toLowerCase().includes('questioncontent') || k.toLowerCase().includes('câu hỏi'));
             let aKey = Object.keys(row).find(k => k.toLowerCase().includes('resultanswer') || k.toLowerCase().includes('đáp án'));
             
-            if (qKey && aKey && row[qKey] && row[aKey] && row[qKey].trim() !== '') {
-                row.QuestionContent = row[qKey]; 
-                row.ResultAnswer = row[aKey];
+            if (qKey && aKey && row[qKey] && row[aKey] && String(row[qKey]).trim() !== '') {
+                row.QuestionContent = String(row[qKey]); 
+                row.ResultAnswer = String(row[aKey]);
                 
-                // Thuật toán dò tìm xem file có chứa sẵn các cột đáp án A, B, C, D không (Dành cho file CSV mới)
+                // Nhận diện cột A, B, C, D có sẵn trong file Excel/CSV
                 row.CustomOptions = [];
                 let optA = Object.keys(row).find(k => k.toLowerCase() === 'aanswer' || k.toLowerCase() === 'aansver');
                 let optB = Object.keys(row).find(k => k.toLowerCase() === 'banswer');
                 let optC = Object.keys(row).find(k => k.toLowerCase() === 'canswer');
                 let optD = Object.keys(row).find(k => k.toLowerCase() === 'danswer');
 
-                if (optA && row[optA]) row.CustomOptions.push(row[optA].trim());
-                if (optB && row[optB]) row.CustomOptions.push(row[optB].trim());
-                if (optC && row[optC]) row.CustomOptions.push(row[optC].trim());
-                if (optD && row[optD]) row.CustomOptions.push(row[optD].trim());
+                if (optA && row[optA]) row.CustomOptions.push(String(row[optA]).trim());
+                if (optB && row[optB]) row.CustomOptions.push(String(row[optB]).trim());
+                if (optC && row[optC]) row.CustomOptions.push(String(row[optC]).trim());
+                if (optD && row[optD]) row.CustomOptions.push(String(row[optD]).trim());
 
                 return true;
             }
@@ -138,11 +162,13 @@
             let correctAns = row.ResultAnswer.trim();
             let choices = [];
 
-            // Nếu phát hiện file có sẵn 4 lựa chọn A, B, C, D thì xài luôn
+            // Nếu file có soạn sẵn 4 cột đáp án thì lấy dùng luôn
             if (row.CustomOptions && row.CustomOptions.length >= 2) {
                 choices = [...row.CustomOptions];
+                // Đảm bảo đáp án đúng phải nằm trong danh sách (phòng trường hợp gõ lỗi)
+                if (!choices.includes(correctAns)) choices.push(correctAns);
             } else {
-                // Nếu không có, hệ thống tự động sinh phương án nhiễu ngẫu nhiên
+                // Nếu không có, tự bốc ngẫu nhiên đáp án câu khác đắp vào
                 choices = [correctAns];
                 let attempts = 0;
                 while(choices.length < 4 && choices.length < validRows.length && attempts < 100) {
@@ -152,14 +178,13 @@
                 }
             }
             
-            // Trộn đảo vị trí đáp án để chống học vẹt
             choices.sort(() => Math.random() - 0.5);
             results.push({ question: row.QuestionContent, options: choices, correctAnswer: correctAns });
         });
         return results;
     }
 
-    // XỬ LÝ VĂN BẢN THÔ (.DOCX KHÔNG CÓ BẢNG)
+    // XỬ LÝ VĂN BẢN THÔ TỪ WORD
     function processTextData(text) {
         let results = [];
         let blocks = text.split(/(?=Câu\s*\d+\s*[:\.])/i);
@@ -210,7 +235,7 @@
         return data;
     }
 
-    // KHỞI ĐỘNG CHƠI QUIZ
+    // GIAO DIỆN CHƠI QUIZ
     function startQuiz(data) {
         quizData = data;
         quizData.sort(() => Math.random() - 0.5); 
@@ -232,7 +257,7 @@
         optionsContainer.innerHTML = '';
         document.getElementById('nextBtn').style.display = 'none';
 
-        const labels = ['A', 'B', 'C', 'D', 'E'];
+        const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
         qData.options.forEach((choice, index) => {
             let labelDiv = document.createElement('label');
             labelDiv.className = 'option-label';
