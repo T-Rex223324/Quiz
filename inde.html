@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz App - Siêu Cấp (Hỗ trợ Bảng Word)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.21/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 700px; margin: 40px auto; padding: 20px; background-color: #f0f2f5; color: #1c1e21; }
+        .container { background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h1 { text-align: center; color: #1877f2; font-size: 26px; margin-bottom: 5px; }
+        .subtitle { text-align: center; color: #606770; font-size: 14px; margin-bottom: 25px; }
+        .upload-area { border: 2px dashed #1877f2; padding: 40px 20px; text-align: center; border-radius: 10px; background: #e7f3ff; margin-bottom: 20px; transition: all 0.3s;}
+        .upload-area:hover { background: #d8ebff; }
+        .btn { background-color: #1877f2; color: white; border: none; padding: 14px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 15px; transition: background 0.2s;}
+        .btn:hover { background-color: #166fe5; }
+        .option-label { display: block; background: #f8f9fa; padding: 15px; margin: 12px 0; border-radius: 8px; cursor: pointer; border: 1px solid #ced4da; transition: all 0.2s; font-size: 16px;}
+        .option-label:hover { background: #e9ecef; border-color: #adb5bd; }
+        .correct { background: #31a24c !important; color: white; border-color: #2b9244; }
+        .wrong { background: #e41e3f !important; color: white; border-color: #cc1a38; }
+        #quizSection, #resultSection { display: none; }
+        .status { text-align: center; color: #606770; margin-top: 15px; font-size: 14px; font-weight: bold;}
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Tạo Quiz Tự Động</h1>
+    <p class="subtitle">Đọc trực tiếp file Word (.docx) chứa Bảng dữ liệu hoặc file .csv</p>
+    
+    <div id="uploadSection" class="upload-area">
+        <p style="font-size: 16px; margin-bottom: 15px;">Chọn file <b>.docx</b> hoặc <b>.csv</b> của bạn:</p>
+        <input type="file" id="dataFile" accept=".docx, .csv, .txt" style="font-size: 15px;">
+        <button class="btn" onclick="processFile()">🚀 Đọc File & Bắt Đầu</button>
+        <div id="loadingStatus" class="status"></div>
+    </div>
+
+    <div id="quizSection">
+        <p style="color: #606770; font-weight: bold; font-size: 15px;">Câu hỏi <span id="currentQNum"></span> / <span id="totalQ"></span></p>
+        <h3 id="questionText" style="line-height: 1.6; color: #1c1e21; font-size: 20px;"></h3>
+        <div id="optionsContainer"></div>
+        <button class="btn" id="nextBtn" onclick="nextQuestion()" style="display:none; margin-top: 25px;">Câu tiếp theo ➔</button>
+    </div>
+
+    <div id="resultSection" style="text-align: center;">
+        <h2 style="font-size: 36px; color: #31a24c; margin-bottom: 10px;">Hoàn Thành! 🎉</h2>
+        <p style="font-size: 22px; color: #1c1e21;">Bạn đã trả lời đúng: <b id="scoreText" style="color: #1877f2;"></b></p>
+        <button class="btn" onclick="location.reload()" style="margin-top: 30px;">Làm lại bài khác ↻</button>
+    </div>
+</div>
+
+<script>
+    let questionsData = [];
+    let currentQuestionIndex = 0;
+    let score = 0;
+
+    // Hàm nhận diện file và xử lý
+    function processFile() {
+        const fileInput = document.getElementById('dataFile').files[0];
+        const statusEl = document.getElementById('loadingStatus');
+        
+        if (!fileInput) {
+            alert("Bạn chưa chọn file kìa!");
+            return;
+        }
+
+        statusEl.innerText = "⏳ Đang phân tích cấu trúc bảng trong file...";
+        const fileName = fileInput.name.toLowerCase();
+
+        // Xử lý file CSV
+        if (fileName.endsWith('.csv') || fileName.endsWith('.txt')) {
+            Papa.parse(fileInput, {
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) { processData(results.data); },
+                error: function() { alert("Lỗi đọc file CSV!"); statusEl.innerText = ""; }
+            });
+        } 
+        // Xử lý file Word chứa Bảng (.docx)
+        else if (fileName.endsWith('.docx')) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                // SỬ DỤNG HTML CONVERSION ĐỂ BẢO TOÀN CẤU TRÚC BẢNG (TABLE) CỦA WORD
+                mammoth.convertToHtml({arrayBuffer: event.target.result})
+                    .then(function(result) {
+                        const htmlString = result.value;
+                        const extractedData = parseHtmlTableToArray(htmlString);
+                        
+                        if (extractedData.length > 0) {
+                            processData(extractedData);
+                        } else {
+                            // Nếu không tìm thấy bảng, thử đọc dưới dạng chữ thô (dự phòng)
+                            mammoth.extractRawText({arrayBuffer: event.target.result}).then(r => {
+                                let t = r.value.replace(/[“”]/g, '"');
+                                Papa.parse(t, { header: true, complete: res => processData(res.data) });
+                            });
+                        }
+                    })
+                    .catch(function(err) {
+                        alert("Lỗi đọc file Word. Vui lòng kiểm tra lại định dạng.");
+                        statusEl.innerText = "";
+                        console.error(err);
+                    });
+            };
+            reader.readAsArrayBuffer(fileInput);
+        } else {
+            alert("Hệ thống chỉ hỗ trợ file .docx hoặc .csv!");
+            statusEl.innerText = "";
+        }
+    }
+
+    // Thuật toán bóc tách Bảng HTML thành Mảng dữ liệu (Giống Excel)
+    function parseHtmlTableToArray(htmlStr) {
+        let parser = new DOMParser();
+        let doc = parser.parseFromString(htmlStr, 'text/html');
+        let table = doc.querySelector('table');
+        if (!table) return []; // Không có bảng nào
+
+        let data = [];
+        let rows = table.querySelectorAll('tr');
+        if (rows.length < 2) return [];
+
+        // Lấy tiêu đề cột từ dòng đầu tiên
+        let headers = [];
+        let headerCells = rows[0].querySelectorAll('th, td');
+        headerCells.forEach(cell => headers.push(cell.textContent.trim()));
+
+        // Quét dữ liệu từng dòng khớp với tiêu đề
+        for (let i = 1; i < rows.length; i++) {
+            let cells = rows[i].querySelectorAll('td');
+            let rowObj = {};
+            cells.forEach((cell, idx) => {
+                if (headers[idx]) {
+                    rowObj[headers[idx]] = cell.textContent.trim();
+                }
+            });
+            data.push(rowObj);
+        }
+        return data;
+    }
+
+    // Chắt lọc dữ liệu đúng chuẩn Quiz
+    function processData(rawData) {
+        const statusEl = document.getElementById('loadingStatus');
+
+        // Tìm cột có chứa từ khóa QuestionContent và ResultAnswer (thông minh hơn để tránh sai sót)
+        questionsData = rawData.filter(row => {
+            let qKey = Object.keys(row).find(k => k.toLowerCase().includes('questioncontent') || k.toLowerCase().includes('câu hỏi'));
+            let aKey = Object.keys(row).find(k => k.toLowerCase().includes('resultanswer') || k.toLowerCase().includes('đáp án'));
+
+            if (qKey && aKey && row[qKey] && row[aKey] && row[qKey].trim() !== '') {
+                row.QuestionContent = row[qKey];
+                row.ResultAnswer = row[aKey];
+                return true;
+            }
+            return false;
+        });
+
+        if (questionsData.length === 0) {
+            statusEl.innerText = "";
+            alert("Vẫn không tìm thấy dữ liệu. Hãy đảm bảo bảng Word của bạn có các cột 'QuestionContent' và 'ResultAnswer'.");
+            return;
+        }
+
+        // Trộn ngẫu nhiên ngân hàng câu hỏi
+        questionsData.sort(() => Math.random() - 0.5);
+
+        // Đổi Giao diện
+        document.getElementById('uploadSection').style.display = 'none';
+        document.getElementById('quizSection').style.display = 'block';
+        document.getElementById('totalQ').innerText = questionsData.length;
+        
+        loadQuestion();
+    }
+
+    // Nạp câu hỏi lên màn hình
+    function loadQuestion() {
+        const qData = questionsData[currentQuestionIndex];
+        document.getElementById('currentQNum').innerText = currentQuestionIndex + 1;
+        document.getElementById('questionText').innerText = qData.QuestionContent;
+        
+        const optionsContainer = document.getElementById('optionsContainer');
+        optionsContainer.innerHTML = '';
+        document.getElementById('nextBtn').style.display = 'none';
+
+        let correctAns = qData.ResultAnswer.trim();
+        let choices = [correctAns];
+
+        // Lấy 3 đáp án ngẫu nhiên làm nhiễu
+        while (choices.length < 4 && choices.length < questionsData.length) {
+            let randomRow = questionsData[Math.floor(Math.random() * questionsData.length)];
+            let randomAns = randomRow.ResultAnswer.trim();
+            if (!choices.includes(randomAns) && randomAns !== '') {
+                choices.push(randomAns);
+            }
+        }
+        
+        // Trộn phương án
+        choices.sort(() => Math.random() - 0.5);
+
+        const labels = ['A', 'B', 'C', 'D'];
+        choices.forEach((choice, index) => {
+            let labelDiv = document.createElement('label');
+            labelDiv.className = 'option-label';
+            labelDiv.innerHTML = `<input type="radio" name="answer" style="margin-right: 12px; transform: scale(1.2);"> <b>${labels[index]}.</b> ${choice}`;
+            labelDiv.onclick = () => checkAnswer(choice, correctAns);
+            optionsContainer.appendChild(labelDiv);
+        });
+    }
+
+    // Xử lý đúng sai
+    function checkAnswer(selected, correct) {
+        const labels = document.querySelectorAll('.option-label');
+        labels.forEach(lbl => {
+            lbl.style.pointerEvents = 'none'; 
+            let answerText = lbl.innerText.substring(3).trim(); 
+            
+            if (answerText === correct.trim()) {
+                lbl.classList.add('correct');
+            } else if (answerText === selected.trim()) {
+                lbl.classList.add('wrong');
+            }
+        });
+
+        if (selected.trim() === correct.trim()) score++;
+        
+        document.getElementById('nextBtn').style.display = 'block';
+    }
+
+    // Chuyển trang
+    function nextQuestion() {
+        currentQuestionIndex++;
+        if (currentQuestionIndex < questionsData.length) {
+            loadQuestion();
+        } else {
+            document.getElementById('quizSection').style.display = 'none';
+            document.getElementById('resultSection').style.display = 'block';
+            document.getElementById('scoreText').innerText = `${score} / ${questionsData.length}`;
+        }
+    }
+</script>
+
+</body>
+</html>
