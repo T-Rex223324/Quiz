@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quiz App - Đọc trực tiếp Word Data</title>
+    <title>Quiz App - Siêu Cấp</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.21/mammoth.browser.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
@@ -24,11 +24,11 @@
 <body>
 
 <div class="container">
-    <h1>Tạo Quiz Từ File Word </h1>
+    <h1>Tạo Quiz Tự Động</h1>
     
     <div id="uploadSection" class="upload-area">
-        <p>Chọn file <b>.docx</b> chứa dữ liệu của bạn:</p>
-        <input type="file" id="wordFile" accept=".docx, .csv">
+        <p>Chọn file <b>.docx</b> hoặc <b>.csv</b> chứa dữ liệu của bạn:</p>
+        <input type="file" id="wordFile" accept=".docx, .csv, .txt">
         <button class="btn" onclick="processFile()">Bắt đầu tạo Quiz</button>
         <div id="loadingStatus" class="status"></div>
     </div>
@@ -52,7 +52,7 @@
     let currentQuestionIndex = 0;
     let score = 0;
 
-    // Xử lý file khi người dùng bấm nút
+    // Xử lý file đa năng
     function processFile() {
         const fileInput = document.getElementById('wordFile').files[0];
         const statusEl = document.getElementById('loadingStatus');
@@ -62,52 +62,83 @@
             return;
         }
 
-        statusEl.innerText = "Đang đọc và xử lý dữ liệu từ file Word...";
+        statusEl.innerText = "Đang đọc và xử lý dữ liệu...";
+        const fileName = fileInput.name.toLowerCase();
 
-        if (fileInput.name.endsWith('.docx')) {
-            // Dùng Mammoth để lôi toàn bộ chữ trong file Word ra
+        // Ưu tiên 1: Nếu người dùng chọn tải file CSV
+        if (fileName.endsWith('.csv') || fileName.endsWith('.txt')) {
+            Papa.parse(fileInput, {
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    processData(results.data);
+                },
+                error: function() { 
+                    alert("Lỗi đọc file CSV!"); 
+                    statusEl.innerText = ""; 
+                }
+            });
+        } 
+        // Ưu tiên 2: Nếu người dùng tải file Word
+        else if (fileName.endsWith('.docx')) {
             const reader = new FileReader();
             reader.onload = function(event) {
                 mammoth.extractRawText({arrayBuffer: event.target.result})
                     .then(function(result) {
-                        parseExtractedText(result.value);
+                        // Sửa lỗi ngớ ngẩn của Word: Tự biến ngoặc kép thẳng thành ngoặc kép cong
+                        let text = result.value.replace(/[“”]/g, '"');
+                        Papa.parse(text, {
+                            header: true,
+                            skipEmptyLines: true,
+                            complete: function(results) {
+                                processData(results.data);
+                            }
+                        });
                     })
                     .catch(function(err) {
-                        alert("Lỗi đọc file Word. Hãy chắc chắn file không bị hỏng.");
+                        alert("Lỗi không thể đọc file Word. File có thể bị hỏng.");
+                        statusEl.innerText = "";
                         console.error(err);
                     });
             };
             reader.readAsArrayBuffer(fileInput);
         } else {
-            alert("Vui lòng tải lên đúng file .docx của bạn.");
+            alert("Hệ thống chỉ hỗ trợ file .docx hoặc .csv!");
+            statusEl.innerText = "";
         }
     }
 
-    // Dùng PapaParse bóc tách dữ liệu chữ đã lấy từ Word
-    function parseExtractedText(rawText) {
-        Papa.parse(rawText, {
-            header: true, // Dòng đầu tiên là tiêu đề (ID, Mã đề...)
-            skipEmptyLines: true,
-            complete: function(results) {
-                // Lọc bỏ các dòng trắng hoặc lỗi
-                questionsData = results.data.filter(row => row.QuestionContent && row.ResultAnswer && row.QuestionContent.trim() !== '');
-                
-                if (questionsData.length === 0) {
-                    document.getElementById('loadingStatus').innerText = "";
-                    alert("Không nhận diện được câu hỏi. File Word phải có cấu trúc chuẩn.");
-                    return;
-                }
+    // Hàm xử lý dữ liệu sau khi phân tích
+    function processData(rawData) {
+        const statusEl = document.getElementById('loadingStatus');
 
-                // Trộn ngẫu nhiên thứ tự toàn bộ bộ câu hỏi
-                questionsData.sort(() => Math.random() - 0.5);
+        // Bóc tách dữ liệu thông minh, bỏ qua lỗi khoảng trắng thừa ở tiêu đề
+        questionsData = rawData.filter(row => {
+            let qKey = Object.keys(row).find(k => k.trim().toLowerCase() === 'questioncontent');
+            let aKey = Object.keys(row).find(k => k.trim().toLowerCase() === 'resultanswer');
 
-                document.getElementById('uploadSection').style.display = 'none';
-                document.getElementById('quizSection').style.display = 'block';
-                document.getElementById('totalQ').innerText = questionsData.length;
-                
-                loadQuestion();
+            if (qKey && aKey && row[qKey] && row[aKey] && row[qKey].trim() !== '') {
+                row.QuestionContent = row[qKey];
+                row.ResultAnswer = row[aKey];
+                return true;
             }
+            return false;
         });
+
+        if (questionsData.length === 0) {
+            statusEl.innerText = "";
+            alert("Không tìm thấy dữ liệu hợp lệ! Mẹo: Nếu file Word cứ báo lỗi, hãy Save As nó thành file .CSV rồi tải lên, đảm bảo 100% ăn ngay.");
+            return;
+        }
+
+        // Trộn ngẫu nhiên câu hỏi
+        questionsData.sort(() => Math.random() - 0.5);
+
+        document.getElementById('uploadSection').style.display = 'none';
+        document.getElementById('quizSection').style.display = 'block';
+        document.getElementById('totalQ').innerText = questionsData.length;
+        
+        loadQuestion();
     }
 
     // Hiển thị câu hỏi lên màn hình
@@ -120,23 +151,23 @@
         optionsContainer.innerHTML = '';
         document.getElementById('nextBtn').style.display = 'none';
 
-        // Lấy đáp án đúng
-        let correctAns = qData.ResultAnswer;
+        // Lấy đáp án đúng và làm sạch khoảng trắng
+        let correctAns = qData.ResultAnswer.trim();
         let choices = [correctAns];
 
-        // Lấy thêm 3 đáp án ngẫu nhiên từ các câu khác để làm phương án nhiễu
+        // Lấy 3 đáp án ngẫu nhiên làm nhiễu
         while (choices.length < 4 && choices.length < questionsData.length) {
             let randomRow = questionsData[Math.floor(Math.random() * questionsData.length)];
-            let randomAns = randomRow.ResultAnswer;
-            if (!choices.includes(randomAns) && randomAns.trim() !== '') {
+            let randomAns = randomRow.ResultAnswer.trim();
+            if (!choices.includes(randomAns) && randomAns !== '') {
                 choices.push(randomAns);
             }
         }
         
-        // Đảo lộn vị trí 4 phương án
+        // Đảo lộn vị trí
         choices.sort(() => Math.random() - 0.5);
 
-        // Hiển thị các lựa chọn (A, B, C, D)
+        // Hiển thị ra các nút A, B, C, D
         const labels = ['A', 'B', 'C', 'D'];
         choices.forEach((choice, index) => {
             let labelDiv = document.createElement('label');
@@ -147,21 +178,21 @@
         });
     }
 
-    // Kiểm tra câu trả lời
+    // Kiểm tra đúng sai
     function checkAnswer(selected, correct) {
         const labels = document.querySelectorAll('.option-label');
         labels.forEach(lbl => {
-            lbl.style.pointerEvents = 'none'; // Khóa không cho bấm tiếp
-            let answerText = lbl.innerText.substring(3).trim(); // Bỏ phần "A. " để lấy nội dung
+            lbl.style.pointerEvents = 'none'; 
+            let answerText = lbl.innerText.substring(3).trim(); 
             
-            if (answerText === correct) {
+            if (answerText === correct.trim()) {
                 lbl.classList.add('correct');
-            } else if (answerText === selected) {
+            } else if (answerText === selected.trim()) {
                 lbl.classList.add('wrong');
             }
         });
 
-        if (selected === correct) score++;
+        if (selected.trim() === correct.trim()) score++;
         
         document.getElementById('nextBtn').style.display = 'block';
     }
