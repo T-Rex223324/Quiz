@@ -220,11 +220,15 @@
         return results;
     }
 
-    // --- TÍNH NĂNG NÂNG CẤP: BÓC TÁCH HTML WORD THÔNG MINH ---
     function processWordHtmlData(htmlStr) {
         let parser = new DOMParser(); 
         let doc = parser.parseFromString(htmlStr, 'text/html');
-        let elements = doc.body.childNodes;
+        // Lấy tất cả các thẻ block cơ bản chứa text
+        let allElements = Array.from(doc.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6'));
+        // Loại bỏ các thẻ bị lồng nhau (để tránh lặp text, ví dụ li chứa p)
+        let elements = allElements.filter(el => {
+            return !allElements.some(parent => parent !== el && parent.contains(el));
+        });
         
         let results = [];
         let currentQuestion = null;
@@ -234,36 +238,66 @@
         for (let i = 0; i < elements.length; i++) {
             let el = elements[i];
             if (!el.textContent) continue;
-            let text = el.textContent.replace(/\s+/g, ' ').trim(); // Dọn dẹp khoảng trắng dư
+            let text = el.textContent.replace(/\s+/g, ' ').trim(); 
             if (text === '') continue;
 
+            let strongTags = el.querySelectorAll('strong, b');
+            let boldTexts = Array.from(strongTags).map(t => t.textContent.replace(/\s+/g, ' ').trim()).filter(t => t.length > 1);
+            let isEntireNodeBold = (el.tagName.toLowerCase() === 'strong' || el.tagName.toLowerCase() === 'b' || 
+                                   (strongTags.length === 1 && strongTags[0].textContent.trim() === text) ||
+                                   el.style.fontWeight === 'bold' || el.style.fontWeight >= 600);
+
             // 1. Dấu hiệu nhận biết câu hỏi (bắt đầu bằng "Câu X.")
-            if (/^Câu\s*\d+\s*[:\.]/i.test(text)) {
+            if (/^(Câu|Câu hỏi)\s*\d+\s*[:\.\-]/i.test(text)) {
                 // Lưu lại câu hỏi cũ trước khi tạo câu mới
                 if (currentQuestion && currentOptions.length > 0) {
                     if (!currentCorrectAnswer) currentCorrectAnswer = currentOptions[0]; // Mặc định A nếu quên bôi đen
                     results.push({ question: currentQuestion, options: currentOptions, correctAnswer: currentCorrectAnswer });
                 }
                 
-                currentQuestion = text.replace(/^Câu\s*\d+\s*[:\.]/i, '').trim();
+                currentQuestion = text.replace(/^(Câu|Câu hỏi)\s*\d+\s*[:\.\-]/i, '').trim();
                 currentOptions = [];
                 currentCorrectAnswer = "";
             } 
-            // 2. Dấu hiệu nhận biết đáp án (bắt đầu bằng a. b. c. d.)
-            else if (/^[a-e][\.\)]\s/i.test(text)) {
+            // 2. Dấu hiệu nhận biết đáp án (bắt đầu bằng a. b. c. d. hoặc chứa chúng, hoặc là thẻ li)
+            else if (/(?:^|\s)[a-hA-H][\.\)]/.test(text) || el.tagName.toLowerCase() === 'li') {
                 if (currentQuestion !== null) {
-                    let optText = text.replace(/^[a-e][\.\)]\s*/i, '').trim();
-                    if (optText !== '') {
-                        currentOptions.push(optText);
-                        
-                        // KIỂM TRA ĐÁP ÁN ĐÚNG BẰNG IN ĐẬM (<b> hoặc <strong>)
-                        let strongTags = el.querySelectorAll('strong, b');
-                        let boldLength = 0;
-                        strongTags.forEach(tag => boldLength += tag.textContent.trim().length);
-                        
-                        // Đề phòng trường hợp chỉ bôi đen mỗi chữ "a." hoặc "b.", ta đếm xem độ dài bôi đen có lớn hơn 3 ký tự không.
-                        if (boldLength > 3 || el.tagName.toLowerCase() === 'strong' || el.tagName.toLowerCase() === 'b') {
-                            currentCorrectAnswer = optText;
+                    let optionsTextArray = [];
+                    
+                    if (/(?:^|\s)[a-hA-H][\.\)]/.test(text)) {
+                        let regex = /(?:^|\s)([a-hA-H][\.\)][\s\S]*?)(?=\s+[a-hA-H][\.\)]|$)/g;
+                        let lastIndex = 0;
+                        let match;
+                        while ((match = regex.exec(text)) !== null) {
+                            if (lastIndex === 0 && match.index > 0) {
+                                let prefix = text.substring(0, match.index).trim();
+                                if (prefix !== '') optionsTextArray.push(prefix);
+                            }
+                            optionsTextArray.push(match[1].trim());
+                            lastIndex = regex.lastIndex;
+                        }
+                    } else if (el.tagName.toLowerCase() === 'li') {
+                        optionsTextArray.push(text);
+                    }
+
+                    for (let optFullText of optionsTextArray) {
+                        let optText = optFullText.replace(/^[a-hA-H][\.\)]\s*/, '').trim();
+                        if (optText !== '') {
+                            currentOptions.push(optText);
+                            
+                            // KIỂM TRA ĐÁP ÁN ĐÚNG BẰNG IN ĐẬM
+                            let isCorrect = isEntireNodeBold;
+                            
+                            if (!isCorrect && boldTexts.length > 0) {
+                                isCorrect = boldTexts.some(b => {
+                                    let cleanB = b.replace(/^[a-hA-H][\.\)]\s*/, '').trim();
+                                    return cleanB.length > 2 && (optText.includes(cleanB) || cleanB.includes(optText));
+                                });
+                            }
+                            
+                            if (isCorrect) {
+                                currentCorrectAnswer = optText;
+                            }
                         }
                     }
                 }
