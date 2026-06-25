@@ -248,24 +248,24 @@
                                    el.style.fontWeight === 'bold' || el.style.fontWeight >= 600);
 
             // 1. Dấu hiệu nhận biết câu hỏi (bắt đầu bằng "Câu X.")
-            if (/^(Câu|Câu hỏi)\s*\d+\s*[:\.\-]/i.test(text)) {
+            if (/^(Câu|Câu hỏi)\s*\d+[\s:\.\-]/i.test(text)) {
                 // Lưu lại câu hỏi cũ trước khi tạo câu mới
                 if (currentQuestion && currentOptions.length > 0) {
                     if (!currentCorrectAnswer) currentCorrectAnswer = currentOptions[0]; // Mặc định A nếu quên bôi đen
                     results.push({ question: currentQuestion, options: currentOptions, correctAnswer: currentCorrectAnswer });
                 }
                 
-                currentQuestion = text.replace(/^(Câu|Câu hỏi)\s*\d+\s*[:\.\-]/i, '').trim();
+                currentQuestion = text.replace(/^(Câu|Câu hỏi)\s*\d+[\s:\.\-]*/i, '').trim();
                 currentOptions = [];
                 currentCorrectAnswer = "";
             } 
             // 2. Dấu hiệu nhận biết đáp án (bắt đầu bằng a. b. c. d. hoặc chứa chúng, hoặc là thẻ li)
-            else if (/(?:^|\s)[a-hA-H][\.\)]/.test(text) || el.tagName.toLowerCase() === 'li') {
+            else if (/(?:^|\s)[a-hA-H][\.\)\/]/.test(text) || el.tagName.toLowerCase() === 'li') {
                 if (currentQuestion !== null) {
                     let optionsTextArray = [];
                     
-                    if (/(?:^|\s)[a-hA-H][\.\)]/.test(text)) {
-                        let regex = /(?:^|\s)([a-hA-H][\.\)][\s\S]*?)(?=\s+[a-hA-H][\.\)]|$)/g;
+                    if (/(?:^|\s)[a-hA-H][\.\)\/]/.test(text)) {
+                        let regex = /(?:^|\s)([a-hA-H][\.\)\/][\s\S]*?)(?=\s+[a-hA-H][\.\)\/]|$)/g;
                         let lastIndex = 0;
                         let match;
                         while ((match = regex.exec(text)) !== null) {
@@ -281,7 +281,7 @@
                     }
 
                     for (let optFullText of optionsTextArray) {
-                        let optText = optFullText.replace(/^[a-hA-H][\.\)]\s*/, '').trim();
+                        let optText = optFullText.replace(/^[a-hA-H][\.\)\/]\s*/, '').trim();
                         if (optText !== '') {
                             currentOptions.push(optText);
                             
@@ -290,7 +290,7 @@
                             
                             if (!isCorrect && boldTexts.length > 0) {
                                 isCorrect = boldTexts.some(b => {
-                                    let cleanB = b.replace(/^[a-hA-H][\.\)]\s*/, '').trim();
+                                    let cleanB = b.replace(/^[a-hA-H][\.\)\/]\s*/, '').trim();
                                     return cleanB.length > 2 && (optText.includes(cleanB) || cleanB.includes(optText));
                                 });
                             }
